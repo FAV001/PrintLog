@@ -1,13 +1,13 @@
 #Ini section
 #задаем настройки для соеднения с SQL
 $sql_server = "10.193.1.161"
+$sql_instance = "sqlexpress"
 $user = "login_pel"
 $password = "EQLwaZRj5H"
 $base = "PrintLog" 
 
 #INI секция
 #настройки логирования
-$writelog = $true   #пишем лог или нет
 $logFile = "$(Get-Content Env:TEMP)\plagent.log" # имя лог файла
 $logSize = 250kb    #максимальный размер файла лога, если больше пересоздаем
 $logLevel = "DEBUG" # ("DEBUG","INFO","WARN","ERROR","FATAL")
@@ -91,7 +91,7 @@ function Reset-Log
                     $operatingFilenumber = $i 
                     $newfilename = "$filefullname.$operatingFilenumber" 
                     $operatingFile = $files | Where-Object{($_.name).trim($fn) -eq ($i-1)} 
-                    write-host "moving to $newfilename" 
+                    #write-host "moving to $newfilename" 
                     move-item ($operatingFile.FullName) -Destination $newfilename -Force 
                 } 
                 elseif($i -ge $logcount) 
@@ -102,14 +102,14 @@ function Reset-Log
                         $operatingFile = $files | Where-Object{($_.name).trim($fn) -eq $operatingFilenumber} 
                         
                     } 
-                    write-host "deleting " ($operatingFile.FullName) 
+                    #write-host "deleting " ($operatingFile.FullName) 
                     remove-item ($operatingFile.FullName) -Force 
                 } 
                 elseif($i -eq 1) 
                 { 
                     $operatingFilenumber = 1 
                     $newfilename = "$filefullname.$operatingFilenumber" 
-                    write-host "moving to $newfilename" 
+                    #write-host "moving to $newfilename" 
                     move-item $filefullname -Destination $newfilename -Force 
                 } 
                 else 
@@ -117,7 +117,7 @@ function Reset-Log
                     $operatingFilenumber = $i +1  
                     $newfilename = "$filefullname.$operatingFilenumber" 
                     $operatingFile = $files | Where-Object{($_.name).trim($fn) -eq ($i-1)} 
-                    write-host "moving to $newfilename" 
+                    #write-host "moving to $newfilename" 
                     move-item ($operatingFile.FullName) -Destination $newfilename -Force    
                 } 
             } 
@@ -132,12 +132,124 @@ function Reset-Log
     $LogRollStatus 
 } 
 
-function debug {
-    param ([string]$sData)    
-    if ($writelog -eq $true) {
-        Write-Log $sData
-    }
+function Get-DatabaseData {
+	[CmdletBinding()]
+	param (
+		[string]$connectionString,
+		[string]$query,
+		[switch]$isSQLServer
+	)
+	if ($isSQLServer) {
+		Write-Verbose 'in SQL Server mode'
+		$connection = New-Object -TypeName System.Data.SqlClient.SqlConnection
+	} else {
+		Write-Verbose 'in OleDB mode'
+		$connection = New-Object -TypeName System.Data.OleDb.OleDbConnection
+	}
+	$connection.ConnectionString = $connectionString
+	$command = $connection.CreateCommand()
+	$command.CommandText = $query
+	if ($isSQLServer) {
+		$adapter = New-Object -TypeName System.Data.SqlClient.SqlDataAdapter $command
+	} else {
+		$adapter = New-Object -TypeName System.Data.OleDb.OleDbDataAdapter $command
+	}
+	$dataset = New-Object -TypeName System.Data.DataSet
+	$adapter.Fill($dataset)
+	$dataset.Tables[0]
 }
 
-$Events = Get-Winevent -FilterHashTable @{LogName='Microsoft-Windows-PrintService/Operational'; ID=307;} 
-debug $Events.Count
+function Invoke-DatabaseQuery {
+	[CmdletBinding()]
+	param (
+		[string]$connectionString,
+		[string]$query,
+		[switch]$isSQLServer
+	)
+	if ($isSQLServer) {
+		Write-Verbose 'in SQL Server mode'
+		$connection = New-Object -TypeName System.Data.SqlClient.SqlConnection
+	} else {
+		Write-Verbose 'in OleDB mode'
+		$connection = New-Object -TypeName System.Data.OleDb.OleDbConnection
+	}
+	$connection.ConnectionString = $connectionString
+	$command = $connection.CreateCommand()
+	$command.CommandText = $query
+	$connection.Open()
+	$command.ExecuteNonQuery()
+	$connection.close()
+}
+
+function Invoke-ULC {
+    #Update last connect
+    [CmdletBinding()]
+	param (
+		[string]$ComputerName
+	)
+   $sqlQuery = "exec dbo.update_pc_last_connect '$ComputerName';"
+   Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer 
+}
+
+function Invoke-ULE {
+    #Update last event
+    [CmdletBinding()]
+	param (
+		[string]$ComputerName
+	)
+   $sqlQuery = "exec dbo.update_pc_last_event '$ComputerName';"
+   Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer 
+}
+
+<#function get_pc_last_event {
+    [CmdletBinding()]
+	param (
+		[string]$ComputerName
+	)
+   $sqlQuery = "exec dbo.get_last_event_update '$ComputerName';"
+   return = (Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer)[1][0]   
+}
+
+function get_pc_last_connect {
+    [CmdletBinding()]
+	param (
+		[string]$ComputerName
+	)
+   $sqlQuery = "exec dbo.get_last_connect '$ComputerName';"
+   return = (Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer)[1][0]   
+}#>
+
+# Основной алгоритм
+Write-Log "Начинаем работу" "INFO"
+try {
+    Test-Connection -ComputerName $sql_server -ErrorAction Stop | Out-Null
+    Write-Log "SQL Сервер $sql_server доступен" "INFO"
+    if ($sql_instance -ne "") {
+        $ConnectionSQLString = "Data Source= $sql_server\$sql_instance;Initial Catalog=$base;User ID=$user;Password=$password;"
+#        $ConnectionSQLString = "Provider=SQLOLEDB;Data Source= $sql_server\$sql_instance;Initial Catalog=$base;User ID=$user;Password=$password;"
+    }
+    else {
+#        $ConnectionSQLString = "Provider=SQLOLEDB;Data Source= $sql_server;Initial Catalog=$base;User ID=$user;Password=$password;"
+        $ConnectionSQLString = "Data Source= $sql_server;Initial Catalog=$base;User ID=$user;Password=$password;"
+    }
+   $ComputerName = $env:computername
+   Write-Log "Computer Name -> $ComputerName"
+   $bias  = (Get-WmiObject -Class Win32_TimeZone).Bias
+   Write-Log "Bias -> $bias"
+   $sqlQuery = "exec dbo.Get_Computer_Id '$ComputerName', '$bias';"
+   $ComputerId = (Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer)[1][0]
+   Write-Log "Computer ID -> $ComputerId"
+   Invoke-ULC -ComputerName $ComputerName
+   Invoke-ULE -ComputerName $ComputerName
+   
+<#   $last_event_update = get_pc_last_event -ComputerName $ComputerName
+   Write-Log "Дата последнего обновления журнала -> $last_event_update"
+   $last_connect = get_pc_last_connect -ComputerName $ComputerName
+   Write-Log "Дата последнего соединения с SQL -> $last_connect"#>
+}
+catch {
+    Write-Log "SQL Сервер $sql_server не доступен" "ERROR"
+    return    
+}
+#$Events = Get-Winevent -FilterHashTable @{LogName = 'Microsoft-Windows-PrintService/Operational'; ID = 307; } 
+#debug $Events.Count
