@@ -1,6 +1,12 @@
+[CmdletBinding()]
+param (
+    [switch]$isNoSCCM # как запускается скрипт. По умолчанию что скрипт работает в SCCM и вывод в консоль отключается, только лог файл
+)
+
+$compliance = "No"
 #Ini section
 #задаем настройки для соеднения с SQL
-$sql_server = "10.193.1.161"
+$sql_server = "10.193.1.24"
 $sql_instance = "sqlexpress"
 $user = "login_pel"
 $password = "EQLwaZRj5H"
@@ -12,12 +18,13 @@ $logFile = "$(Get-Content Env:TEMP)\plagent.log" # имя лог файла
 $logSize = 250kb    #максимальный размер файла лога, если больше пересоздаем
 $logLevel = "DEBUG" # ("DEBUG","INFO","WARN","ERROR","FATAL")
 $logCount = 2   #Количетсво хранимых логов при ротации
-
 #INI End
 
 function Write-Log-Line ($line) {
     Add-Content $logFile -Value $Line
-    Write-Host $Line
+    if ($isNoSCCM) {
+        Write-Host $Line        
+    }
 }
 
 Function Write-Log {
@@ -69,16 +76,16 @@ function Reset-Log
         { 
             $fileDir = $file.Directory 
             $fn = $file.name #this gets the name of the file we started with 
-            $files = Get-ChildItem $filedir | ?{$_.name -like "$fn*"} | Sort-Object lastwritetime 
+            $files = Get-ChildItem $filedir | Where-Object{$_.name -like "$fn*"} | Sort-Object lastwritetime 
             $filefullname = $file.fullname #this gets the fullname of the file we started with 
             #$logcount +=1 #add one to the count as the base file is one more than the count 
             for ($i = ($files.count); $i -gt 0; $i--) 
             {  
                 #[int]$fileNumber = ($f).name.Trim($file.name) #gets the current number of the file we are on 
-                $files = Get-ChildItem $filedir | ?{$_.name -like "$fn*"} | Sort-Object lastwritetime 
-                $operatingFile = $files | ?{($_.name).trim($fn) -eq $i} 
+                $files = Get-ChildItem $filedir | Where-Object{$_.name -like "$fn*"} | Sort-Object lastwritetime 
+                $operatingFile = $files | Where-Object{($_.name).trim($fn) -eq $i} 
                 if ($operatingfile) 
-                 {$operatingFilenumber = ($files | ?{($_.name).trim($fn) -eq $i}).name.trim($fn)} 
+                 {$operatingFilenumber = ($files | Where-Object{($_.name).trim($fn) -eq $i}).name.trim($fn)} 
                 else 
                 {$operatingFilenumber = $null} 
  
@@ -87,7 +94,7 @@ function Reset-Log
                     $operatingFilenumber = $i 
                     $newfilename = "$filefullname.$operatingFilenumber" 
                     $operatingFile = $files | Where-Object{($_.name).trim($fn) -eq ($i-1)} 
-                    write-host "moving to $newfilename" 
+                    write-log "moving to $newfilename" "INFO"
                     move-item ($operatingFile.FullName) -Destination $newfilename -Force 
                 } 
                 elseif($i -ge $logcount) 
@@ -95,31 +102,27 @@ function Reset-Log
                     if($operatingFilenumber -eq $null) 
                     {  
                         $operatingFilenumber = $i - 1 
-                        $operatingFile = $files | ?{($_.name).trim($fn) -eq $operatingFilenumber} 
-                        
+                        $operatingFile = $files | Where-Object{($_.name).trim($fn) -eq $operatingFilenumber}
                     } 
-                    write-host "deleting " ($operatingFile.FullName) 
+                    write-Log "deleting  ($operatingFile.FullName) " "WARN"
                     remove-item ($operatingFile.FullName) -Force 
                 } 
                 elseif($i -eq 1) 
                 { 
                     $operatingFilenumber = 1 
                     $newfilename = "$filefullname.$operatingFilenumber" 
-                    write-host "moving to $newfilename" 
+                    write-log "moving to $newfilename" "INFO"
                     move-item $filefullname -Destination $newfilename -Force 
                 } 
                 else 
                 { 
                     $operatingFilenumber = $i +1  
                     $newfilename = "$filefullname.$operatingFilenumber" 
-                    $operatingFile = $files | ?{($_.name).trim($fn) -eq ($i-1)} 
-                    write-host "moving to $newfilename" 
+                    $operatingFile = $files | Where-Object{($_.name).trim($fn) -eq ($i-1)} 
+                    write-log "moving to $newfilename" "INFO"
                     move-item ($operatingFile.FullName) -Destination $newfilename -Force    
                 } 
-                     
             } 
- 
-                     
           } 
          else 
          { $logRollStatus = $false} 
@@ -131,56 +134,57 @@ function Reset-Log
     $LogRollStatus 
 } 
 
-function Get-DatabaseData {
-    [CmdletBinding()]
-    param (
-        [string]$connectionString,
-        [string]$query,
-        [switch]$isSQLServer
-    )
-    if ($isSQLServer) {
-        Write-Verbose 'in SQL Server mode'
-        $connection = New-Object -TypeName System.Data.SqlClient.SqlConnection
-    }
-    else {
-        Write-Verbose 'in OleDB mode'
-        $connection = New-Object -TypeName System.Data.OleDb.OleDbConnection
-    }
-    $connection.ConnectionString = $connectionString
-    $command = $connection.CreateCommand()
-    $command.CommandText = $query
-    if ($isSQLServer) {
-        $adapter = New-Object -TypeName System.Data.SqlClient.SqlDataAdapter $command
-    }
-    else {
-        $adapter = New-Object -TypeName System.Data.OleDb.OleDbDataAdapter $command
-    }
-    $dataset = New-Object -TypeName System.Data.DataSet
-    $adapter.Fill($dataset)
-    $dataset.Tables[0]
-}
-
-function Invoke-DatabaseQuery {
-    [CmdletBinding()]
-    param (
-        [string]$connectionString,
-        [string]$query,
-        [switch]$isSQLServer
-    )
-    if ($isSQLServer) {
-        Write-Verbose 'in SQL Server mode'
-        $connection = New-Object -TypeName System.Data.SqlClient.SqlConnection
-    }
-    else {
-        Write-Verbose 'in OleDB mode'
-        $connection = New-Object -TypeName System.Data.OleDb.OleDbConnection
-    }
-    $connection.ConnectionString = $connectionString
-    $command = $connection.CreateCommand()
-    $command.CommandText = $query
-    $connection.Open()
-    $command.ExecuteNonQuery()
-    $connection.close()
+function Invoke-SQLQuery 	{
+	[OutputType([System.Data.DataTable])]
+	Param
+	(
+		[Parameter(Mandatory = $True, Position = 1)]
+		[String[]]$QueryString,
+		[Parameter(Mandatory = $True, Position = 2)]
+		[String]$ConnectionString
+	)
+	If ($QueryString -like 'select*' -or $QueryString -like 'exec*')
+	{
+		try
+		{
+			$command = New-Object System.Data.SqlClient.SqlCommand ($QueryString, $ConnectionString)
+			$adapter = New-Object System.Data.SqlClient.SqlDataAdapter ($command)
+			
+			#Load the Dataset
+			$dataset = New-Object System.Data.DataSet
+			$adapter.Fill($dataset)
+			$adapter.Dispose()
+		}
+		catch
+		{
+			Write-Log $error[0] "error" 3
+			Write-Log $error[0].Exception "error" 3
+		}
+		Remove-Variable -Name adapter -ErrorAction 0
+		Remove-Variable -Name command -ErrorAction 0
+		Remove-Variable -Name QueryString -ErrorAction 0
+		#Remove-Variable -Name ConnectionString -ErrorAction 0
+		[System.GC]::Collect()
+		#Return the Dataset
+		return @(, $dataset.Tables[0])
+	}
+	elseif ($QueryString -like 'insert*' -or $QueryString -like 'update*' -or $QueryString -like 'delete*')
+	{
+		$connect = New-Object System.Data.SqlClient.SqlConnection($ConnectionString)
+		$command = New-Object System.Data.SqlClient.SqlCommand ($QueryString, $connect)
+		$connect.Open()
+		$command.ExecuteReader()
+		$connect.Close()
+		$command.Dispose()
+		$connect.Dispose()
+		Remove-Variable -Name adapter -ErrorAction 0
+		Remove-Variable -Name command -ErrorAction 0
+		Remove-Variable -Name connect -ErrorAction 0
+		Remove-Variable -Name QueryString -ErrorAction 0
+		#Remove-Variable -Name ConnectionString -ErrorAction 0
+		[System.GC]::Collect()
+		return $null
+	}
 }
 
 function Invoke-UpdateLastConection {
@@ -191,7 +195,7 @@ function Invoke-UpdateLastConection {
     )
     try {
         $sqlQuery = "exec dbo.update_pc_last_connect '$ComputerName';"
-        Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer 
+        Invoke-SQLQuery -QueryString $sqlQuery -ConnectionString $ConnectionSQLString
     }
     catch {
         Write-Log "Что-то пошло не так $_.FullyQualifiedErrorId" "ERROR"        
@@ -207,7 +211,7 @@ function Invoke-UpdateLastEvent {
     )
     try {
         $sqlQuery = "exec dbo.update_pc_last_event '$ComputerName', '$date';"
-        Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer 
+        Invoke-SQLQuery -ConnectionString $ConnectionSQLString -QueryString $sqlQuery
     }
     catch {
         Write-Log "Что-то пошло не так $_.FullyQualifiedErrorId" "ERROR"        
@@ -230,7 +234,7 @@ function Invoke-Event {
     try {
         $userId = Get-UserID -username $user
         $sqlQuery = "exec dbo.add_event '$sID','$computer','$userId','$pages_count','$document_name','$size','$printer_name','$datetimeprint';"
-        Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer 
+        Invoke-SQLQuery -ConnectionString $ConnectionSQLString -QueryString $sqlQuery | Out-Null
         Write-Log "Event добавлен успешно -> $sID" "INFO"        
     }
     catch {
@@ -245,7 +249,7 @@ function Get-UpdateLastEvent {
     )
     try {
         $sqlQuery = "exec dbo.get_last_event_update '$ComputerName';"
-        $result = (Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer)[1][0]
+        $result = (Invoke-SQLQuery -ConnectionString $ConnectionSQLString -QueryString $sqlQuery)[1].Rows[0].Column1
         Write-Log "получили Last Update Event - $result" "INFO"
         return $result
     }
@@ -261,7 +265,7 @@ function Get-UpdateLastConnect {
 	)
     try {
         $sqlQuery = "exec dbo.get_last_connect '$ComputerName';"
-        $result = (Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer)[1][0]   
+        $result = Invoke-SQLQuery -ConnectionString $ConnectionSQLString -QueryString $sqlQuery
         Write-Log "получили Last Connection - $result" "INFO"
         return $result
     }
@@ -277,13 +281,23 @@ function Get-UserID {
 	)
     try {
         $sqlQuery = "exec dbo.get_user_id '$username';"
-        $result = (Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer)[1][0]
+        $result = (Invoke-SQLQuery -ConnectionString $ConnectionSQLString -QueryString $sqlQuery)[1].Rows[0].Id
         Write-Log "получили UserID - $result" "INFO"
         return $result
     }
     catch {
         Write-Log "Что-то пошло не так $_.FullyQualifiedErrorId" "ERROR"        
     }
+}
+function get-ComputerID{
+    [CmdletBinding()]
+	param (
+		[string]$Computer,
+        [int]$Bias
+	)
+    $sqlQuery = "exec dbo.Get_Computer_Id '$ComputerName', '$bias';"
+    $result = (Invoke-SQLQuery -QueryString $sqlQuery -ConnectionString $ConnectionSQLString)[1].Rows[0].id    
+    return $result
 }
 
 # Основной алгоритм
@@ -293,37 +307,39 @@ try {
     Write-Log "SQL Сервер $sql_server доступен" "INFO"
     if ($sql_instance -ne "") {
         $ConnectionSQLString = "Data Source= $sql_server\$sql_instance;Initial Catalog=$base;User ID=$user;Password=$password;"
-        #        $ConnectionSQLString = "Provider=SQLOLEDB;Data Source= $sql_server\$sql_instance;Initial Catalog=$base;User ID=$user;Password=$password;"
     }
     else {
-        #        $ConnectionSQLString = "Provider=SQLOLEDB;Data Source= $sql_server;Initial Catalog=$base;User ID=$user;Password=$password;"
         $ConnectionSQLString = "Data Source= $sql_server;Initial Catalog=$base;User ID=$user;Password=$password;"
     }
-    $ComputerName = $env:computername
-    Write-Log "Computer Name -> $ComputerName" "INFO"
-    $bias = (Get-WmiObject -Class Win32_TimeZone).Bias
-    Write-Log "Bias -> $bias" "INFO"
-    $sqlQuery = "exec dbo.Get_Computer_Id '$ComputerName', '$bias';"
-    $ComputerId = (Get-DatabaseData -connectionString $ConnectionSQLString -query $sqlQuery -isSQLServer)[1][0]
-    Write-Log "Computer ID -> $ComputerId" "INFO"
 }
 catch {
     Write-Log "SQL Сервер $sql_server не доступен" "ERROR"
-    return    
+    $compliance = "Error"
+    Write-Output $compliance    
+    Exit -1    
 }
-Invoke-UpdateLastConection -ComputerName $ComputerName
+$ComputerName = $env:computername
+Write-Log "Computer Name -> $ComputerName" "INFO"
+$bias = (Get-WmiObject -Class Win32_TimeZone).Bias
+Write-Log "Bias -> $bias" "INFO"
+$ComputerId = get-ComputerID -Computer $ComputerName -Bias $bias
+Write-Log "Computer ID -> $ComputerId" "INFO"
+
+$compliance = "Yes"
+Invoke-UpdateLastConection -ComputerName $ComputerName | Out-Null
 $lasteventupdate = Get-UpdateLastEvent -ComputerName $ComputerName
 Write-Log "Last events transfer to server $lasteventupdate" "WARN"
 try {
     $Events = Get-Winevent -FilterHashTable @{LogName = 'Microsoft-Windows-PrintService/Operational'; ID = 307; StartTime = $lasteventupdate; } -ErrorAction Stop 
     $DateEvent = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     Write-Log "дата обновления логов $DateEvent" "WARN"
-    Invoke-UpdateLastEvent -ComputerName $ComputerName -date $DateEvent
+    Invoke-UpdateLastEvent -ComputerName $ComputerName -date $DateEvent | Out-Null
     $CountEvent = $Events.Count
     Write-Log "Количество не сохраненных событий печати -> $CountEvent" "INFO"    
     try {
         ForEach ($Event in $Events) {            
-        # Конвертируем событие XML            
+        # Конвертируем событие XML
+            $compliance = "Update"
             $eventXML = [xml]$Event.ToXml()
             $PageCount = $eventXML.Event.UserData.DocumentPrinted.Param8
             $UserName = $eventXML.Event.UserData.DocumentPrinted.Param3
@@ -335,7 +351,7 @@ try {
             Write-Log "User - $UserName; Page Count - $PageCount; Size - $Size; Printer - $Printer; Date - $date" "INFO"
             $sID = $ComputerName+(Get-Date $eventXML.Event.System.TimeCreated.SystemTime -Format "yyyyMMddHHmmssfff")
             Invoke-Event -sID $sID -computer $ComputerId -user $UserName -pages_count $PageCount -document_name $DocumentName -size $Size -printer_name $Printer -datetimeprint $date
-}            
+        }
     }
     catch {
         Write-Log "Что-то пошло не так $_.FullyQualifiedErrorId" "ERROR"
@@ -347,5 +363,12 @@ catch [Exception] {
         Write-Log "Не удалось найти события, соответствующие указанному условию выбора"  "WARN"  
         Write-Log "LogName = 'Microsoft-Windows-PrintService/Operational'; ID = 307; StartTime = $lasteventupdate;" "ERROR"        
     }
+}
+if ($isNoSCCM) {
+    
+}
+else {
+    Write-Log "compliance -> $compliance" "WARN"
+    Write-Output $compliance    
 }
 Write-Log "========================          Завершаем работу скрипта          ========================" "INFO"
