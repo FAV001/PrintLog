@@ -265,7 +265,11 @@ function get-IDdistinguishedName{
 
 # Основной алгоритм
 Write-Log "======================   Начинаем работу  ==========================" "INFO"
-Import-Module ActiveDirectory
+# проверяем загружен ли модуль ActiveDirectory
+if (-not(Get-Module ActiveDirectory)) {
+    Import-Module ActiveDirectory
+}
+
 #Import-Module SQLPS
 if ($sql_instance -ne "") {
     $ConnectionSQLString = "Data Source= $sql_server\$sql_instance;Initial Catalog=$base;Integrated Security = SSPI;"
