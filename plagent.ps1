@@ -300,6 +300,19 @@ function get-ComputerID{
     return $result
 }
 
+function get-PrinterID{
+    [CmdletBinding()]
+	param (
+        	[int]$computer_id,
+			[string]$name,
+			[string]$portname,
+			[string]$drivername,
+			[bool]$shared
+	)
+    $sqlQuery = "exec dbo.Get_Printer_Id '$computer_id', '$name', '$portname', '$drivername', '$shared';"
+    $result = (Invoke-SQLQuery -QueryString $sqlQuery -ConnectionString $ConnectionSQLString)[1].Rows[0].id    
+    return $result
+}
 # Основной алгоритм
 Write-Log "======================   Начинаем работу  ==========================" "INFO"
 try {
@@ -327,6 +340,30 @@ Write-Log "Computer ID -> $ComputerId" "INFO"
 
 $compliance = "Yes"
 Invoke-UpdateLastConection -ComputerName $ComputerName | Out-Null
+#регистрируем все принтеры в базе
+try {
+    $Printers = Get-Printer
+    $CountPrinter = $Printers.Count
+    Write-Log "Количество прнтеров в системе -> $CountPrinter" "INFO"
+    ForEach ($Printer in $Printers) {
+        #исключаем терминальные принтеры
+        if ($Printer.PortName.Contains('TS0') -ne $true) {
+            #Исключаем следующие принтеры
+            if (($Printer.Name.Contains('Microsoft') -ne $true)`
+                 -and ($Printer.Name.Contains('Fax') -ne $true)`
+                 -and ($Printer.Name.Contains('OneNote') -ne $true)`
+                 -and ($Printer.Name.Contains('PaperPort Image Printer') -ne $true)`
+                 -and ($Printer.Name.Contains('PDF') -ne $true)) {
+                $PrinterId = get-PrinterID -computer_id $ComputerId -name $Printer.Name -portname $Printer.PortName -drivername $Printer.DriverName -shared $Printer.Shared
+                Write-Log "Принтер ID -> $PrinterId" "INFO"
+            }
+        }
+    }
+}
+catch {
+    Write-Log "Что-то пошло не так $_.FullyQualifiedErrorId" "ERROR"    
+}
+
 $lasteventupdate = Get-UpdateLastEvent -ComputerName $ComputerName
 Write-Log "Last events transfer to server $lasteventupdate" "WARN"
 try {
