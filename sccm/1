@@ -1,0 +1,6 @@
+if ((Get-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-Windows-PrintService/Operational').GetValue('Enabled') -eq 1) {
+    Write-Output "Compliant"
+}
+else {
+    Write-Output "No Compliant"   
+}

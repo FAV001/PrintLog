@@ -1,0 +1,3 @@
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-Windows-PrintService/Operational' -Name 'Enabled' -Value '1'
+Restart-Service eventlog
+Restart-Service Spooler

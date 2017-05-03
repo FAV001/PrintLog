@@ -342,7 +342,8 @@ $compliance = "Yes"
 Invoke-UpdateLastConection -ComputerName $ComputerName | Out-Null
 #регистрируем все принтеры в базе
 try {
-    $Printers = Get-Printer
+    $Printers = Get-WMIObject -Class Win32_Printer  | Select Name,DriverName,PortName,Shared
+#    $Printers = Get-Printer
     $CountPrinter = $Printers.Count
     Write-Log "Количество прнтеров в системе -> $CountPrinter" "INFO"
     ForEach ($Printer in $Printers) {
